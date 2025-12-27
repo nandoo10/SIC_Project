@@ -9,7 +9,7 @@ from gi.repository import GLib
 # --- CONFIGURAÇÃO ---
 CHAT_SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"
 CHAT_MSG_UUID     = "12345678-1234-5678-1234-56789abcdef1"
-LOCAL_NAME        = "Sink_Martim"
+LOCAL_NAME        = "Sink"
 
 # --- INTERFACES BLUEZ ---
 BLUEZ_SERVICE_NAME = 'org.bluez'
@@ -180,24 +180,46 @@ class Characteristic(dbus.service.Object):
 
 class ChatQueue(Characteristic):
     def __init__(self, bus, index, service):
-        Characteristic.__init__(self, bus, index, CHAT_MSG_UUID, ['write', 'notify'], service)
-        self.value = []
-        self.notifying = False
+        Characteristic.__init__(
+            self, bus, index, CHAT_MSG_UUID, ['write', 'notify'], service
+        )
+        self.forwarding_table = {}
 
-    def WriteValue(self, value, options, sender=None):
-        msg_bytes = bytes(value)
-        # Decodifica para mostrar no terminal
-        print(f"[SINK RECEBEU]: {msg_bytes.decode('utf-8', errors='ignore')}")
-        self.value.append(msg_bytes)
+    # CORREÇÃO 1: Adicionar o decorator explicitamente com signatures de in/out
+    @dbus.service.method(GATT_CHARACTERISTIC_IFACE, in_signature='aya{sv}', out_signature='ay')
+    def WriteValue(self, value, options):
+        # Converter os bytes recebidos para string
+        try:
+            raw = bytes(value).decode("utf-8", errors="ignore")
+        except Exception:
+            print("[ERRO] Falha ao decodificar bytes.")
+            return dbus.Array([], signature='y')
+
+        # CORREÇÃO 2: Parse seguro. Se falhar, retorna OK para não cair a conexão, mas avisa no log.
+        try:
+            nid, msg = raw.split("|", 1)
+        except ValueError:
+            print(f"[ERRO] Formato inválido recebido: {raw}")
+            # Retornar array vazio diz ao BlueZ "Recebido, obrigado", mesmo que o formato esteja errado.
+            return dbus.Array([], signature='y')
+
+        # CORREÇÃO 3: Obter o endereço do remetente através do 'options' (Device Object Path)
+        # O options['device'] vem como: "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"
+        device_path = str(options.get('device', ''))
+        sender_address = "Desconhecido"
+        
+        if 'dev_' in device_path:
+            # Extrai o MAC do final da string e substitui _ por :
+            sender_address = device_path.split('dev_')[1].replace('_', ':')
+
+        # 📒 Guardar forwarding (uplink) com o endereço real
+        self.forwarding_table[nid] = sender_address
+
+        print(f"[SINK RECEBEU] De: {sender_address} | NID: {nid} | Msg: {msg}")
+
+        # Confirmação de sucesso para o cliente
         return dbus.Array([], signature='y')
 
-    def StartNotify(self, sender=None):
-        print(f"--> Node conectado e subscreveu notificações.")
-        self.notifying = True
-
-    def StopNotify(self, sender=None):
-        print(f"--> Node cancelou subscrição.")
-        self.notifying = False
 
 class ChatService(Service):
     def __init__(self, bus, path, index):
