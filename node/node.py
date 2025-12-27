@@ -2,7 +2,7 @@
 import asyncio
 from ble_interface import NodeClient
 
-ADAPTER_VM = "hci1"
+ADAPTER_VM = "hci0"
 
 async def main_menu():
     node = NodeClient(adapter=ADAPTER_VM)
