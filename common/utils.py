@@ -15,8 +15,4 @@ def select_adapter():
     # Padrão
     print("[CONFIG] Nenhum adaptador especificado. A usar 'hci0' por defeito.")
     print("         (Para mudar, execute: python script.py hci1)")
-<<<<<<< HEAD
     return "hci0"
-=======
-    return "hci0"
->>>>>>> 1a2867891cc7588f2416331b80e76f4e74bb567d

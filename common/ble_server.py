@@ -165,10 +165,18 @@ class BLEServer:
         self.service_manager.RegisterApplication(self.app.get_path(), {}, reply_handler=register_cb, error_handler=register_error_cb)
         self.ad_manager.RegisterAdvertisement(self.adv.get_path(), {}, reply_handler=register_cb, error_handler=register_error_cb)
 
-        # Watchdog
+        # --- CORREÇÃO DE VISIBILIDADE PERSISTENTE ---
         def device_connected_handler(interface, changed, invalidated, path):
             if interface == 'org.bluez.Device1' and 'Connected' in changed:
-                GLib.timeout_add_seconds(1, self._force_restart_adv_internal)
+                connected = changed['Connected']
+                if connected:
+                    # Se alguém se conecta, tenta restaurar a visibilidade após 2s e 5s
+                    # print(f"[SERVER] Conexão detetada. A restaurar visibilidade...")
+                    GLib.timeout_add_seconds(2, self._force_restart_adv_internal)
+                    GLib.timeout_add_seconds(5, self._force_restart_adv_internal)
+                else:
+                    # Se desconecta, restaura imediatamente
+                    GLib.timeout_add_seconds(1, self._force_restart_adv_internal)
 
         self.bus.add_signal_receiver(device_connected_handler, dbus_interface="org.freedesktop.DBus.Properties", signal_name="PropertiesChanged", path_keyword="path")
 
@@ -187,14 +195,26 @@ class BLEServer:
         if self.adv: self.adv.update_local_name(new_name)
         if self.mainloop: GLib.idle_add(self._force_restart_adv_internal)
 
+    # --- TENTA FORÇAR O ANÚNCIO A FICAR ATIVO ---
     def _force_restart_adv_internal(self):
+        # 1. Tenta Parar
         try: self.ad_manager.UnregisterAdvertisement(self.adv.get_path())
         except: pass
-        try: self.ad_manager.RegisterAdvertisement(self.adv.get_path(), {}, reply_handler=lambda:None, error_handler=lambda e:None)
-        except: pass
-        return False
+        
+        # 2. Tenta Iniciar
+        try: 
+            self.ad_manager.RegisterAdvertisement(self.adv.get_path(), {}, reply_handler=lambda:None, error_handler=self._adv_error_handler)
+            # print(f"[SERVER] Visibilidade restaurada: {self.local_name}")
+            return False # Pára o timeout se tiver sucesso
+        except:
+            return True # Tenta de novo se falhar imediatamente
 
-    # --- RESTART ROBUSTO ---
+    def _adv_error_handler(self, error):
+        # Se der erro (ex: AlreadyExists), agendamos nova tentativa
+        # print(f"[SERVER] Aviso Adv: {error}. A tentar de novo...")
+        GLib.timeout_add_seconds(2, self._force_restart_adv_internal)
+
+    # --- RESTART TOTAL (RESET) ---
     def restart_server(self, new_name):
         self.local_name = new_name
         self.retry_count = 0
@@ -210,7 +230,6 @@ class BLEServer:
             try: self.service_manager.UnregisterApplication(self.app.get_path())
             except: pass
         
-        # 5 segundos de espera para o Node 2 detetar o timeout
         print(f"[SERVER] A aguardar 5s para garantir desconexão...")
         GLib.timeout_add_seconds(5, self._step2_start_services)
         return False
@@ -228,18 +247,14 @@ class BLEServer:
 
     def _on_register_error(self, error):
         err_str = str(error)
-        
-        # Se for NoReply ou AlreadyExists, não entramos em pânico, tentamos de novo
         if "AlreadyExists" in err_str or "NoReply" in err_str:
-            # print(f"[SERVER] Erro temporário ({err_str}). A tentar novamente...")
-            
             try: self.ad_manager.UnregisterAdvertisement(self.adv.get_path())
             except: pass
             try: self.service_manager.UnregisterApplication(self.app.get_path())
             except: pass
             
             self.retry_count += 1
-            if self.retry_count < 10: # Tenta até 10 vezes
+            if self.retry_count < 10: 
                 GLib.timeout_add_seconds(2, self._step2_start_services)
             else:
                 print("[SERVER] FALHA: Não foi possível reiniciar.")
