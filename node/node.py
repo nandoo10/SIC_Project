@@ -73,7 +73,8 @@ async def main_menu():
     my_node_client = NodeClient(adapter=adapter_name)
     my_node_client.set_disconnect_handler(on_uplink_lost)
     
-    my_nid_short = my_node_client.nid[-4:] if len(my_node_client.nid) >=4 else my_node_client.nid
+    # Usar os últimos 4 chars do NID de 128 bits apenas para display/local name
+    my_nid_short = my_node_client.nid[-4:]
     initial_name = f"Node-{my_nid_short} [Hop:-1]"
     
     print(f"[INIT] A iniciar servidor local como: {initial_name}")

@@ -1,5 +1,5 @@
 import asyncio
-import uuid
+import os  # alterado para usar os.urandom
 from bleak import BleakClient, BleakScanner
 
 # UUIDs do Projeto
@@ -15,8 +15,8 @@ class NodeClient:
         self.on_disconnect_callback = None
         self._watchdog_task = None 
 
-        # NID único (8 chars)
-        self.nid = uuid.uuid4().hex[:8]
+        # NID único de 128 bits (16 bytes)
+        self.nid = os.urandom(16).hex()  # hex string de 32 caracteres
         print(f"[NODE] NID atribuído: {self.nid}")
 
     def set_disconnect_handler(self, callback):
@@ -67,7 +67,6 @@ class NodeClient:
                     if char.uuid.lower() == CHAT_MSG_UUID.lower():
                         self.chat_char = char
                         print(f"[CONNECT] Serviço de Chat encontrado!")
-                        # Inicia o Ping Ativo
                         self._start_watchdog()
                         return True
             
@@ -105,10 +104,6 @@ class NodeClient:
             if self.client and self.client.is_connected and self.chat_char:
                 try:
                     payload = f"{self.nid}|PING".encode("utf-8")
-                    
-                    # --- CORREÇÃO: Timeout de 1 segundo ---
-                    # Se o Node 1 estiver encravado no 'NoReply', isto vai
-                    # disparar a exceção TimeoutError imediatamente.
                     await asyncio.wait_for(
                         self.client.write_gatt_char(self.chat_char, payload, response=True),
                         timeout=1.0
